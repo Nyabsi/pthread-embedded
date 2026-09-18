@@ -102,15 +102,25 @@ sem_post (sem_t * sem)
 
       if (s->value < SEM_VALUE_MAX)
         {
-          pte_osResult osResult = pte_osSemaphorePost(s->sem, 1);
-
-          if (++s->value <= 0
-              && (osResult != PTE_OS_OK))
+          /* Only signal the OS semaphore when the incremented value is
+           * still <= 0: that's the only case where a waiter is actually
+           * blocked on it (sem_wait only takes the kernel object then).
+           * Calling pte_osSemaphorePost() unconditionally leaves one
+           * signal on the kernel object per "uncontended" post that
+           * sem_wait will never take back, and the object's signal count
+           * is bounded (SEM_VALUE_MAX / 32767), so it eventually
+           * overflows under sustained use.
+           */
+          if (++s->value <= 0)
             {
-              s->value--;
-              result = EINVAL;
-            }
+              pte_osResult osResult = pte_osSemaphorePost(s->sem, 1);
 
+              if (osResult != PTE_OS_OK)
+                {
+                  s->value--;
+                  result = EINVAL;
+                }
+            }
         }
       else
         {
